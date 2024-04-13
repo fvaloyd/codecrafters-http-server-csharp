@@ -18,12 +18,12 @@ string request = Encoding.ASCII.GetString(responseBytes);
 RequestStartLine sl = RequestStartLine.ParseFromStrRequest(request);
 
 
-var echoPath = "/echo";
+var echoPath = "/echo/";
 if (sl.Path == "/")
 {
     socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n\r\n"));
 }
-else if (sl.Path.StartsWith(echoPath))
+else if (sl.Path.Contains(echoPath))
 {
     var content = sl.Path.Replace(echoPath, "");
     var response = Response.Ok(content);
