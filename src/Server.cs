@@ -8,41 +8,49 @@ TcpListener server = new TcpListener(IPAddress.Any, 4221);
 
 server.Start();
 
-var socket = server.AcceptSocket();
-Console.WriteLine("Connection accepted.");
-
-var responseBytes = new byte[1024];
-int bytesReceived = socket.Receive(responseBytes);
-
-string request = Encoding.ASCII.GetString(responseBytes);
-Request rq = Request.CreateFromStrRequest(request);
-RequestStartLine sl = rq.StartLine;
-
-
-var echoPath = "/echo/";
-var userAgentPath = "/user-agent";
-
-if (sl.Path == "/")
+while (true)
 {
-    socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n\r\n"));
+    ThreadPool.QueueUserWorkItem(HandleRequest);
 }
-else if (sl.Path.StartsWith(userAgentPath))
+
+void HandleRequest(object? o)
 {
-    var content = rq.Headers["User-Agent"];
-    var response = Response.Ok(content);
-    socket.Send(response.ToByte());
-    Console.WriteLine(response.Format());
-}
-else if (sl.Path.StartsWith(echoPath))
-{
-    var content = sl.Path.Replace(echoPath, "");
-    var response = Response.Ok(content);
-    socket.Send(response.ToByte());
-    Console.WriteLine(response.Format());
-}
-else
-{
-    socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n\r\n"));
+    var socket = server.AcceptSocket();
+    Console.WriteLine("Connection accepted.");
+
+    var responseBytes = new byte[1024];
+    int bytesReceived = socket.Receive(responseBytes);
+
+    string request = Encoding.ASCII.GetString(responseBytes);
+    Request rq = Request.CreateFromStrRequest(request);
+    RequestStartLine sl = rq.StartLine;
+
+
+    var echoPath = "/echo/";
+    var userAgentPath = "/user-agent";
+
+    if (sl.Path == "/")
+    {
+        socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n\r\n"));
+    }
+    else if (sl.Path.StartsWith(userAgentPath))
+    {
+        var content = rq.Headers["User-Agent"];
+        var response = Response.Ok(content);
+        socket.Send(response.ToByte());
+        Console.WriteLine(response.Format());
+    }
+    else if (sl.Path.StartsWith(echoPath))
+    {
+        var content = sl.Path.Replace(echoPath, "");
+        var response = Response.Ok(content);
+        socket.Send(response.ToByte());
+        Console.WriteLine(response.Format());
+    }
+    else
+    {
+        socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n\r\n"));
+    }
 }
 
 record Response
