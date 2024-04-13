@@ -18,9 +18,16 @@ string request = Encoding.ASCII.GetString(responseBytes);
 RequestStartLine sl = RequestStartLine.ParseFromStrRequest(request);
 
 
-var randomString = sl.Path.Split('/').Last();
-var response = Response.Ok(randomString);
-socket.Send(response.ToByte());
+if (sl.Path == "/" || sl.Path.StartsWith("/echo"))
+{
+    var randomString = sl.Path.Split('/').Last();
+    var response = Response.Ok(randomString);
+    socket.Send(response.ToByte());
+}
+else
+{
+    socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n"));
+}
 
 record Response
 {
