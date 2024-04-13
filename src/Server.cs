@@ -28,10 +28,38 @@ void HandleRequest(object? o)
 
     var echoPath = "/echo/";
     var userAgentPath = "/user-agent";
+    var filePath = "/files/";
 
     if (sl.Path == "/")
     {
         socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n\r\n"));
+    }
+    else if (sl.Path.StartsWith(filePath))
+    {
+        var directoryName = args[Array.FindIndex(args, 0, args.Length, a => a == "--directory") + 1];
+        var fileName = sl.Path.Replace(filePath, "");
+        var fileFullPath = directoryName + "/" + fileName;
+
+        if (File.Exists(fileFullPath))
+        {
+            using var sr = File.OpenText(fileFullPath);
+            StringBuilder content = new();
+            string currLine;
+            while ((currLine = sr.ReadLine()!) != null)
+            {
+                content.Append(currLine);
+            }
+            var response = Response.Ok(content.ToString());
+            response.AddHeader("Content-Type", "application/octet-stream");
+            socket.Send(response.ToByte());
+            Console.WriteLine(response.Format());
+        }
+        else
+        {
+            socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n\r\n"));
+            socket.Close();
+            Console.WriteLine("Not found");
+        }
     }
     else if (sl.Path.StartsWith(userAgentPath))
     {
@@ -69,6 +97,19 @@ record Response
             {"Content-Length", content.Length.ToString()}
         };
         return new(ResponseStartLine.Ok(), headers, content);
+    }
+
+    public void AddHeader(string type, string value)
+    {
+        var found = Headers.TryGetValue(type, out var v);
+        if (found)
+        {
+            Headers[type] = value;
+        }
+        else
+        {
+            Headers.Add(type, value);
+        }
     }
 
     public string FormatHeaders()
