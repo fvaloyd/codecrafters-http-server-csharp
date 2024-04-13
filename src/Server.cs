@@ -27,7 +27,7 @@ if (sl.Path == "/" || sl.Path.StartsWith("/echo"))
 }
 else
 {
-    socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n"));
+    socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n\r\n"));
 }
 
 record Response
