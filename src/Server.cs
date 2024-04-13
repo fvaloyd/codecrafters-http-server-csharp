@@ -67,8 +67,8 @@ record Response
     {
         var response = new StringBuilder();
         response.Append(StartLine.ToString());
-        response.Append(FormatHeaders() + "\r\n\r\n");
-        response.Append(Content);
+        response.Append(FormatHeaders() + "\r\n");
+        response.Append(Content + "\r\n\r\n");
         return response.ToString();
     }
 
