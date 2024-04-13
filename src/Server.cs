@@ -15,15 +15,25 @@ var responseBytes = new byte[1024];
 int bytesReceived = socket.Receive(responseBytes);
 
 string request = Encoding.ASCII.GetString(responseBytes);
-RequestStartLine sl = RequestStartLine.ParseFromStrRequest(request);
+Request rq = Request.CreateFromStrRequest(request);
+RequestStartLine sl = rq.StartLine;
 
 
 var echoPath = "/echo/";
+var userAgentPath = "/user-agent";
+
 if (sl.Path == "/")
 {
     socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n\r\n"));
 }
-else if (sl.Path.Contains(echoPath))
+else if (sl.Path.StartsWith(userAgentPath))
+{
+    var content = rq.Headers["User-Agent"];
+    var response = Response.Ok(content);
+    socket.Send(response.ToByte());
+    Console.WriteLine(response.Format());
+}
+else if (sl.Path.StartsWith(echoPath))
 {
     var content = sl.Path.Replace(echoPath, "");
     var response = Response.Ok(content);
@@ -58,7 +68,7 @@ record Response
         var headersFormated = new StringBuilder();
         foreach (var kvp in Headers)
         {
-            headersFormated.Append($"{kvp.Key}: {kvp.Value}\r\n");
+            headersFormated.Append($"{kvp.Key.Trim()}: {kvp.Value.Trim()}\r\n");
         }
         return headersFormated.ToString();
     }
@@ -105,12 +115,12 @@ record Request
     static Dictionary<string, string> ParseHeadersFromStrRequest(string request)
     {
         Dictionary<string, string> headers = new();
-        var lines = request.Split("\r\n");
+        var lines = request.Split("\r\n")[1..];
         foreach (var line in lines)
         {
             if (string.IsNullOrEmpty(line)) break;
             var header = line.Split(':');
-            headers.TryAdd(header[0], header[1]);
+            headers.TryAdd(header[0].Trim(), header[1].Trim());
         }
         return headers;
     }
