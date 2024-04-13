@@ -19,7 +19,7 @@ RequestStartLine sl = RequestStartLine.ParseFromStrRequest(request);
 
 
 var echoPath = "/echo";
-if (sl.Path == "/" || sl.Path.StartsWith("/echo"))
+if (sl.Path == "/")
 {
     socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n\r\n"));
 }
