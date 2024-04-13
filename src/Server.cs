@@ -11,17 +11,22 @@ server.Start();
 var socket = server.AcceptSocket();
 Console.WriteLine("Connection accepted.");
 
-var responseBytes = new byte[255];
+var responseBytes = new byte[1024];
 int bytesReceived = socket.Receive(responseBytes);
 
 string request = Encoding.ASCII.GetString(responseBytes);
 RequestStartLine sl = RequestStartLine.ParseFromStrRequest(request);
 
 
+var echoPath = "/echo";
 if (sl.Path == "/" || sl.Path.StartsWith("/echo"))
 {
-    var randomString = sl.Path.Split('/').Last();
-    var response = Response.Ok(randomString);
+    socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n\r\n"));
+}
+else if (sl.Path.StartsWith(echoPath))
+{
+    var content = sl.Path.Replace(echoPath, "");
+    var response = Response.Ok(content);
     socket.Send(response.ToByte());
     Console.WriteLine(response.Format());
 }
@@ -34,18 +39,18 @@ record Response
 {
     public Dictionary<string, string> Headers { get; } = new();
     public ResponseStartLine StartLine { get; private set; }
-    public string Body { get; } = string.Empty;
-    private Response(ResponseStartLine startLine, Dictionary<string, string> headers, string body)
-        => (StartLine, Headers, Body) = (startLine, headers, body);
+    public string Content { get; } = string.Empty;
+    private Response(ResponseStartLine startLine, Dictionary<string, string> headers, string content)
+        => (StartLine, Headers, Content) = (startLine, headers, content);
 
-    public static Response Ok(string body)
+    public static Response Ok(string content)
     {
         var headers = new Dictionary<string, string>()
         {
             {"Content-Type", "text/plain"},
-            {"Content-Length", body.Length.ToString()}
+            {"Content-Length", content.Length.ToString()}
         };
-        return new(ResponseStartLine.Ok(), headers, body);
+        return new(ResponseStartLine.Ok(), headers, content);
     }
 
     public string FormatHeaders()
@@ -62,9 +67,8 @@ record Response
     {
         var response = new StringBuilder();
         response.Append(StartLine.ToString());
-        response.Append(FormatHeaders());
-        response.Append("\r\n");
-        response.Append(Body + "\r\n\r\n");
+        response.Append(FormatHeaders() + "\r\n\r\n");
+        response.Append(Content);
         return response.ToString();
     }
 
