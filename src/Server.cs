@@ -15,27 +15,119 @@ var responseBytes = new byte[255];
 int bytesReceived = socket.Receive(responseBytes);
 
 string request = Encoding.ASCII.GetString(responseBytes);
-RequestStartLine sl = RequestStartLine.Create(request);
+RequestStartLine sl = RequestStartLine.ParseFromStrRequest(request);
 
-string okResponseStartLine = "HTTP/1.1 200 OK\r\n\r\n";
-string notFoundResponseStartLine = "HTTP/1.1 404 NotFound\r\n\r\n";
 
-if (sl.Path == "/")
+var randomString = sl.Path.Split('/').Last();
+var response = Response.Ok(randomString);
+socket.Send(response.ToByte());
+
+record Response
 {
-    byte[] sendBytes = Encoding.ASCII.GetBytes(okResponseStartLine);
-    socket.Send(sendBytes);
-    Console.WriteLine(okResponseStartLine + "response sended");
+    public Dictionary<string, string> Headers { get; } = new();
+    public ResponseStartLine StartLine { get; private set; }
+    public string Body { get; } = string.Empty;
+    private Response(ResponseStartLine startLine, Dictionary<string, string> headers, string body)
+        => (StartLine, Headers, Body) = (startLine, headers, body);
+
+    public static Response Ok(string body)
+    {
+        var headers = new Dictionary<string, string>()
+        {
+            {"Content-Type", "text/plain"},
+            {"Content-Length", body.Length.ToString()}
+        };
+        return new(ResponseStartLine.Ok(), headers, body);
+    }
+
+    public string FormatHeaders()
+    {
+        var headersFormated = new StringBuilder();
+        foreach (var kvp in Headers)
+        {
+            headersFormated.Append($"{kvp.Key}: {kvp.Value}\r\n");
+        }
+        return headersFormated.ToString();
+    }
+
+    public string Format()
+    {
+        var response = new StringBuilder();
+        response.Append(StartLine.ToString());
+        response.Append(FormatHeaders());
+        response.Append("\r\n");
+        response.Append(Body + "\r\n");
+        return response.ToString();
+    }
+
+    public byte[] ToByte()
+        => Encoding.ASCII.GetBytes(Format());
 }
-else
+
+record struct ResponseStartLine(string HttpVersion, string StatusCode, string StatusText)
 {
-    byte[] sendBytes = Encoding.ASCII.GetBytes(notFoundResponseStartLine);
-    socket.Send(sendBytes);
-    Console.WriteLine(notFoundResponseStartLine + "response sended");
+    public static ResponseStartLine Ok()
+        => new("HTTP/1.1", "200", "OK");
+    public static ResponseStartLine NotFound(Request request)
+        => new("HTTP/1.1", "404", "Not Found");
+
+    public override string ToString()
+        => $"{HttpVersion} {StatusCode} {StatusText}\r\n";
+}
+
+record Request
+{
+    public RequestStartLine StartLine { get; private set; }
+    public Dictionary<string, string> Headers { get; } = new();
+
+    private Request(RequestStartLine sl, Dictionary<string, string> headers)
+        => (StartLine, Headers) = (sl, headers);
+
+    public static Request CreateFromStrRequest(string request)
+    {
+        var sl = RequestStartLine.ParseFromStrRequest(request);
+        var headers = ParseHeadersFromStrRequest(request);
+        return new(sl, headers);
+    }
+
+    static Dictionary<string, string> ParseHeadersFromStrRequest(string request)
+    {
+        Dictionary<string, string> headers = new();
+        var lines = request.Split("\r\n");
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrEmpty(line)) break;
+            var header = line.Split(':');
+            headers.TryAdd(header[0], header[1]);
+        }
+        return headers;
+    }
+
+    public string FormatHeaders()
+    {
+        var headersFormated = new StringBuilder();
+        foreach (var kvp in Headers)
+        {
+            headersFormated.AppendLine($"{kvp.Key}: {kvp.Value}\r\n");
+        }
+        return headersFormated.ToString();
+    }
+
+    public string Format()
+    {
+        var request = new StringBuilder();
+        request.Append(StartLine.ToString());
+        request.Append(FormatHeaders());
+        return request.ToString();
+    }
+
+    public byte[] ToByte()
+        => Encoding.ASCII.GetBytes(Format());
 }
 
 record struct RequestStartLine(string HttpMethod, string Path, string HttpVersion)
 {
-    public static RequestStartLine Create(string request)
+    public static RequestStartLine ParseFromStrRequest(string request)
     {
         var startLine = request
                 .Split("\r\n")
@@ -45,7 +137,7 @@ record struct RequestStartLine(string HttpMethod, string Path, string HttpVersio
     }
 
     public override string ToString()
-        => $"{HttpMethod} {Path} {HttpVersion}";
+        => $"{HttpMethod} {Path} {HttpVersion}\r\n";
 
     public byte[] ToByte()
         => Encoding.ASCII.GetBytes(ToString());
