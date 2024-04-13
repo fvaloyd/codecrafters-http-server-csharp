@@ -23,6 +23,7 @@ if (sl.Path == "/" || sl.Path.StartsWith("/echo"))
     var randomString = sl.Path.Split('/').Last();
     var response = Response.Ok(randomString);
     socket.Send(response.ToByte());
+    Console.WriteLine(response.Format());
 }
 else
 {
@@ -63,7 +64,7 @@ record Response
         response.Append(StartLine.ToString());
         response.Append(FormatHeaders());
         response.Append("\r\n");
-        response.Append(Body + "\r\n");
+        response.Append(Body + "\r\n\r\n");
         return response.ToString();
     }
 
