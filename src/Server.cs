@@ -3,213 +3,174 @@ using System.Net.Sockets;
 using System.Text;
 
 Console.WriteLine("Starting server...");
-
 TcpListener server = new TcpListener(IPAddress.Any, 4221);
-
 server.Start();
+
+const string ECHO_PATH = "/echo/";
+const string FILE_PATH = "/files";
+const string USER_AGENT_PATH = "/user-agent";
+byte[] OkSl = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n");
+byte[] CreatedSl = Encoding.ASCII.GetBytes("HTTP/1.1 201 Created\r\n");
+byte[] NotFoundSl = Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n");
 
 while (true)
 {
-    ThreadPool.QueueUserWorkItem(HandleRequest);
+    ThreadPool.QueueUserWorkItem(hr);
 }
 
-void HandleRequest(object? o)
+void hr(object? o)
 {
-    var socket = server.AcceptSocket();
+    var s = server.AcceptSocket();
     Console.WriteLine("Connection accepted.");
 
-    var responseBytes = new byte[1024];
-    int bytesReceived = socket.Receive(responseBytes);
+    var rb = new byte[1024];
+    s.Receive(rb);
 
-    string request = Encoding.ASCII.GetString(responseBytes);
-    Request rq = Request.CreateFromStrRequest(request);
-    RequestStartLine sl = rq.StartLine;
+    var cLen = Array.FindIndex(rb, 0, rb.Length, b => b == 00);
+    rb = rb[..cLen];
+    (byte[] StartLine, byte[] Headers, byte[] Content) = LookupParts(rb);
+    string[] sl = ParseSl(StartLine);
+    Dictionary<string, string> h = ParseHeaders(Headers);
 
-
-    var echoPath = "/echo/";
-    var userAgentPath = "/user-agent";
-    var filePath = "/files/";
-
-    if (sl.Path == "/")
+    if (sl[1] == "/")
     {
-        socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\n\r\n"));
+        s.Send(OkSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
+        s.Close();
     }
-    else if (sl.Path.StartsWith(filePath))
+    else if (sl[1].StartsWith(ECHO_PATH))
     {
-        var directoryName = args[Array.FindIndex(args, 0, args.Length, a => a == "--directory") + 1];
-        var fileName = sl.Path.Replace(filePath, "");
-        var fileFullPath = directoryName + "/" + fileName;
-
-        if (File.Exists(fileFullPath))
-        {
-            using var sr = File.OpenText(fileFullPath);
-            StringBuilder content = new();
-            string currLine;
-            while ((currLine = sr.ReadLine()!) != null)
-            {
-                content.Append(currLine);
-            }
-            var response = Response.Ok(content.ToString());
-            response.AddHeader("Content-Type", "application/octet-stream");
-            socket.Send(response.ToByte());
-            Console.WriteLine(response.Format());
-        }
-        else
-        {
-            socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n\r\n"));
-            socket.Close();
-            Console.WriteLine("Not found");
-        }
+        handleEcho(s, sl[1]);
     }
-    else if (sl.Path.StartsWith(userAgentPath))
+    else if (sl[1].StartsWith(USER_AGENT_PATH))
     {
-        var content = rq.Headers["User-Agent"];
-        var response = Response.Ok(content);
-        socket.Send(response.ToByte());
-        Console.WriteLine(response.Format());
+        handleUserAgent(s, h);
     }
-    else if (sl.Path.StartsWith(echoPath))
+    else if (sl[1].StartsWith(FILE_PATH))
     {
-        var content = sl.Path.Replace(echoPath, "");
-        var response = Response.Ok(content);
-        socket.Send(response.ToByte());
-        Console.WriteLine(response.Format());
+        handleFile(s, sl[0], sl[1], Content);
     }
     else
     {
-        socket.Send(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n\r\n"));
+        s.Send(NotFoundSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
+        s.Close();
     }
 }
 
-record Response
+(byte[] StartLine, byte[] Headers, byte[] Content) LookupParts(byte[] request)
 {
-    public Dictionary<string, string> Headers { get; } = new();
-    public ResponseStartLine StartLine { get; private set; }
-    public string Content { get; } = string.Empty;
-    private Response(ResponseStartLine startLine, Dictionary<string, string> headers, string content)
-        => (StartLine, Headers, Content) = (startLine, headers, content);
+    const byte CARRIAGE_RETURN = 13;
+    const byte LINE_FEED = 10;
+    const int ESCAPE_LEN = 4;
+    byte[] sl = new byte[0], h = new byte[0], c = new byte[0];
 
-    public static Response Ok(string content)
+    for (int i = 0; i < request.Length; i++)
     {
-        var headers = new Dictionary<string, string>()
+        if (request[i] == CARRIAGE_RETURN && request[i + 1] == LINE_FEED)
         {
-            {"Content-Type", "text/plain"},
-            {"Content-Length", content.Length.ToString()}
-        };
-        return new(ResponseStartLine.Ok(), headers, content);
-    }
-
-    public void AddHeader(string type, string value)
-    {
-        var found = Headers.TryGetValue(type, out var v);
-        if (found)
-        {
-            Headers[type] = value;
-        }
-        else
-        {
-            Headers.Add(type, value);
+            sl = request[..i];
+            break;
         }
     }
 
-    public string FormatHeaders()
+    for (int i = sl.Length; i < request.Length; i++)
     {
-        var headersFormated = new StringBuilder();
-        foreach (var kvp in Headers)
+        if (request[i] == CARRIAGE_RETURN && request[i + 1] == LINE_FEED && request[i + 2] == CARRIAGE_RETURN && request[i + 3] == LINE_FEED)
         {
-            headersFormated.Append($"{kvp.Key.Trim()}: {kvp.Value.Trim()}\r\n");
+            h = request[sl.Length..i];
+            break;
         }
-        return headersFormated.ToString();
     }
 
-    public string Format()
-    {
-        var response = new StringBuilder();
-        response.Append(StartLine.ToString());
-        response.Append(FormatHeaders() + "\r\n");
-        response.Append(Content + "\r\n\r\n");
-        return response.ToString();
-    }
-
-    public byte[] ToByte()
-        => Encoding.ASCII.GetBytes(Format());
+    int totalReaded = sl.Length + h.Length + ESCAPE_LEN;
+    c = request[totalReaded..];
+    return (sl, h, c);
 }
 
-record struct ResponseStartLine(string HttpVersion, string StatusCode, string StatusText)
+string[] ParseSl(byte[] slb)
 {
-    public static ResponseStartLine Ok()
-        => new("HTTP/1.1", "200", "OK");
-    public static ResponseStartLine NotFound(Request request)
-        => new("HTTP/1.1", "404", "Not Found");
-
-    public override string ToString()
-        => $"{HttpVersion} {StatusCode} {StatusText}\r\n";
+    string sl = Encoding.ASCII.GetString(slb);
+    return sl.Split(' ');
 }
 
-record Request
+Dictionary<string, string> ParseHeaders(byte[] hb)
 {
-    public RequestStartLine StartLine { get; private set; }
-    public Dictionary<string, string> Headers { get; } = new();
-
-    private Request(RequestStartLine sl, Dictionary<string, string> headers)
-        => (StartLine, Headers) = (sl, headers);
-
-    public static Request CreateFromStrRequest(string request)
+    Dictionary<string, string> headers = new();
+    string h = Encoding.ASCII.GetString(hb);
+    var lines = h.Split("\r\n");
+    foreach (var line in lines)
     {
-        var sl = RequestStartLine.ParseFromStrRequest(request);
-        var headers = ParseHeadersFromStrRequest(request);
-        return new(sl, headers);
+        if (string.IsNullOrEmpty(line)) continue;
+        var header = line.Split(':');
+        headers.TryAdd(header[0].Trim(), header[1].Trim());
     }
-
-    static Dictionary<string, string> ParseHeadersFromStrRequest(string request)
-    {
-        Dictionary<string, string> headers = new();
-        var lines = request.Split("\r\n")[1..];
-        foreach (var line in lines)
-        {
-            if (string.IsNullOrEmpty(line)) break;
-            var header = line.Split(':');
-            headers.TryAdd(header[0].Trim(), header[1].Trim());
-        }
-        return headers;
-    }
-
-    public string FormatHeaders()
-    {
-        var headersFormated = new StringBuilder();
-        foreach (var kvp in Headers)
-        {
-            headersFormated.AppendLine($"{kvp.Key}: {kvp.Value}\r\n");
-        }
-        return headersFormated.ToString();
-    }
-
-    public string Format()
-    {
-        var request = new StringBuilder();
-        request.Append(StartLine.ToString());
-        request.Append(FormatHeaders());
-        return request.ToString();
-    }
-
-    public byte[] ToByte()
-        => Encoding.ASCII.GetBytes(Format());
+    return headers;
 }
 
-record struct RequestStartLine(string HttpMethod, string Path, string HttpVersion)
+void handleEcho(Socket s, string path)
 {
-    public static RequestStartLine ParseFromStrRequest(string request)
+    var content = path.Replace(ECHO_PATH, "");
+    var cb = Encoding.ASCII.GetBytes(content);
+    var h = Encoding.ASCII.GetBytes($"Content-Type: text/plain\r\nContent-Length: {cb.Length}\r\n\r\n");
+    byte[] response = OkSl.Concat(h).Concat(cb).ToArray();
+    s.Send(response);
+    s.Close();
+    Console.WriteLine("Sending />\r\n" + Encoding.ASCII.GetString(response));
+}
+
+void handleUserAgent(Socket s, Dictionary<string, string> h)
+{
+    var content = h["User-Agent"];
+    var cb = Encoding.ASCII.GetBytes(content);
+    var hb = Encoding.ASCII.GetBytes($"Content-Type: text/plain\r\nContent-Length: {cb.Length}\r\n\r\n");
+    byte[] response = OkSl.Concat(hb).Concat(cb).ToArray();
+    s.Send(response);
+    s.Close();
+    Console.WriteLine("Sending />\r\n" + Encoding.ASCII.GetString(response));
+}
+
+void handleFile(Socket s, string httpMethod, string path, byte[] content)
+{
+    if (httpMethod == "GET")
     {
-        var startLine = request
-                .Split("\r\n")
-                .First()
-                .Split(' ');
-        return new(startLine[0], startLine[1], startLine[2]);
+        handleFileGET(s, path);
     }
+    else if (httpMethod == "POST")
+    {
+        handleFilePOST(s, path, content);
+    }
+}
 
-    public override string ToString()
-        => $"{HttpMethod} {Path} {HttpVersion}\r\n";
+void handleFileGET(Socket s, string path)
+{
+    var directoryName = args[Array.FindIndex(args, 0, args.Length, a => a == "--directory") + 1];
+    var fileName = path.Replace(FILE_PATH, "");
+    var fileFullPath = directoryName + "/" + fileName;
 
-    public byte[] ToByte()
-        => Encoding.ASCII.GetBytes(ToString());
+    if (File.Exists(fileFullPath))
+    {
+        byte[] content = File.ReadAllBytes(fileFullPath);
+        byte[] headers = Encoding.ASCII.GetBytes($"Content-Type: application/octet-stream\r\nContent-Length: {content.Length}\r\n\r\n");
+        byte[] response = OkSl.Concat(headers).Concat(content).Concat(new byte[] { 13, 10, 13, 10 }).ToArray();
+        s.Send(response);
+        s.Close();
+        Console.WriteLine("Sending />\r\n" + Encoding.ASCII.GetString(response));
+    }
+    else
+    {
+        s.Send(NotFoundSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
+        s.Close();
+    }
+}
+
+void handleFilePOST(Socket s, string path, byte[] content)
+{
+    var directoryName = args[Array.FindIndex(args, 0, args.Length, a => a == "--directory") + 1];
+    var fileName = path.Replace(FILE_PATH, "");
+    var fileFullPath = directoryName + "/" + fileName;
+
+    File.WriteAllBytes(fileFullPath, content);
+    var hb = Encoding.ASCII.GetBytes($"Content-Type: text/plain\r\nContent-Length: {content.Length}\r\n\r\n");
+    byte[] response = CreatedSl.Concat(hb).Concat(content).Concat(new byte[] { 13, 10, 13, 10 }).ToArray();
+    s.Send(response);
+    s.Close();
 }
