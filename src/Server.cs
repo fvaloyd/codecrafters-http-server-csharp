@@ -15,16 +15,17 @@ byte[] NotFoundSl = Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\n");
 
 while (true)
 {
-    ThreadPool.QueueUserWorkItem(hr);
+    Console.WriteLine($"Waiting for requests...");
+    var s = await server.AcceptSocketAsync();
+    Task.Run(async () => await hr(s));
 }
 
-void hr(object? o)
+async Task hr(Socket s)
 {
-    using var s = server.AcceptSocket();
     Console.WriteLine("Connection accepted.");
 
     var rb = new byte[1024];
-    var bReceives = s.Receive(rb);
+    var bReceives = await s.ReceiveAsync(rb);
     rb = rb[..bReceives];
 
     (byte[] StartLine, byte[] Headers, byte[] Content) = LookupParts(rb);
@@ -33,24 +34,24 @@ void hr(object? o)
 
     if (sl[1] == "/")
     {
-        s.Send(OkSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
+        await s.SendAsync(OkSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
         s.Close();
     }
     else if (sl[1].StartsWith(ECHO_PATH))
     {
-        handleEcho(s, sl[1]);
+        await handleEcho(s, sl[1]);
     }
     else if (sl[1].StartsWith(USER_AGENT_PATH))
     {
-        handleUserAgent(s, h);
+        await handleUserAgent(s, h);
     }
     else if (sl[1].StartsWith(FILE_PATH))
     {
-        handleFile(s, sl[0], sl[1], Content);
+        await handleFile(s, sl[0], sl[1], Content);
     }
     else
     {
-        s.Send(NotFoundSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
+        await s.SendAsync(NotFoundSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
         s.Close();
     }
 }
@@ -105,41 +106,41 @@ Dictionary<string, string> ParseHeaders(byte[] hb)
     return headers;
 }
 
-void handleEcho(Socket s, string path)
+async Task handleEcho(Socket s, string path)
 {
     var content = path.Replace(ECHO_PATH, "");
     var cb = Encoding.ASCII.GetBytes(content);
     var h = Encoding.ASCII.GetBytes($"Content-Type: text/plain\r\nContent-Length: {cb.Length}\r\n\r\n");
     byte[] response = OkSl.Concat(h).Concat(cb).ToArray();
-    s.Send(response);
+    await s.SendAsync(response);
     s.Close();
     Console.WriteLine("Sending />\r\n" + Encoding.ASCII.GetString(response));
 }
 
-void handleUserAgent(Socket s, Dictionary<string, string> h)
+async Task handleUserAgent(Socket s, Dictionary<string, string> h)
 {
     var content = h["User-Agent"];
     var cb = Encoding.ASCII.GetBytes(content);
     var hb = Encoding.ASCII.GetBytes($"Content-Type: text/plain\r\nContent-Length: {cb.Length}\r\n\r\n");
     byte[] response = OkSl.Concat(hb).Concat(cb).ToArray();
-    s.Send(response);
+    await s.SendAsync(response);
     s.Close();
     Console.WriteLine("Sending />\r\n" + Encoding.ASCII.GetString(response));
 }
 
-void handleFile(Socket s, string httpMethod, string path, byte[] content)
+async Task handleFile(Socket s, string httpMethod, string path, byte[] content)
 {
     if (httpMethod == "GET")
     {
-        handleFileGET(s, path);
+        await handleFileGET(s, path);
     }
     else if (httpMethod == "POST")
     {
-        handleFilePOST(s, path, content);
+        await handleFilePOST(s, path, content);
     }
 }
 
-void handleFileGET(Socket s, string path)
+async Task handleFileGET(Socket s, string path)
 {
     var directoryName = args[Array.FindIndex(args, 0, args.Length, a => a == "--directory") + 1];
     var fileName = path.Replace(FILE_PATH, "");
@@ -147,29 +148,29 @@ void handleFileGET(Socket s, string path)
 
     if (File.Exists(fileFullPath))
     {
-        byte[] content = File.ReadAllBytes(fileFullPath);
+        byte[] content = await File.ReadAllBytesAsync(fileFullPath);
         byte[] headers = Encoding.ASCII.GetBytes($"Content-Type: application/octet-stream\r\nContent-Length: {content.Length}\r\n\r\n");
         byte[] response = OkSl.Concat(headers).Concat(content).Concat(new byte[] { 13, 10, 13, 10 }).ToArray();
-        s.Send(response);
+        await s.SendAsync(response);
         s.Close();
         Console.WriteLine("Sending />\r\n" + Encoding.ASCII.GetString(response));
     }
     else
     {
-        s.Send(NotFoundSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
+        await s.SendAsync(NotFoundSl.Concat(new byte[] { 13, 10, 13, 10 }).ToArray());
         s.Close();
     }
 }
 
-void handleFilePOST(Socket s, string path, byte[] content)
+async Task handleFilePOST(Socket s, string path, byte[] content)
 {
     var directoryName = args[Array.FindIndex(args, 0, args.Length, a => a == "--directory") + 1];
     var fileName = path.Replace(FILE_PATH, "");
     var fileFullPath = directoryName + "/" + fileName;
 
-    File.WriteAllBytes(fileFullPath, content);
+    await File.WriteAllBytesAsync(fileFullPath, content);
     var hb = Encoding.ASCII.GetBytes($"Content-Type: text/plain\r\nContent-Length: {content.Length}\r\n\r\n");
     byte[] response = CreatedSl.Concat(hb).Concat(content).Concat(new byte[] { 13, 10, 13, 10 }).ToArray();
-    s.Send(response);
+    await s.SendAsync(response);
     s.Close();
 }
