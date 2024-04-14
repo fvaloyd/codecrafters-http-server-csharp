@@ -24,10 +24,9 @@ void hr(object? o)
     Console.WriteLine("Connection accepted.");
 
     var rb = new byte[1024];
-    s.Receive(rb);
+    var bReceives = s.Receive(rb);
+    rb = rb[..bReceives];
 
-    var cLen = Array.FindIndex(rb, 0, rb.Length, b => b == 00);
-    rb = rb[..cLen];
     (byte[] StartLine, byte[] Headers, byte[] Content) = LookupParts(rb);
     string[] sl = ParseSl(StartLine);
     Dictionary<string, string> h = ParseHeaders(Headers);
