@@ -20,7 +20,7 @@ while (true)
 
 void hr(object? o)
 {
-    var s = server.AcceptSocket();
+    using var s = server.AcceptSocket();
     Console.WriteLine("Connection accepted.");
 
     var rb = new byte[1024];
@@ -101,7 +101,7 @@ Dictionary<string, string> ParseHeaders(byte[] hb)
     {
         if (string.IsNullOrEmpty(line)) continue;
         var header = line.Split(':');
-        headers.TryAdd(header[0].Trim(), header[1].Trim());
+        headers.TryAdd(header[0].Trim(), string.Join("", header[1..]).Trim());
     }
     return headers;
 }
